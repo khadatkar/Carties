@@ -3,6 +3,8 @@ using AuctionService.DTOs;
 using AuctionService.Entities;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Contracts;
+using MassTransit;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,11 +16,13 @@ namespace AuctionService.Controllers
 	{
 		private readonly AuctionDataContext _Context;
 		private readonly IMapper _Mapper;
+		private readonly IPublishEndpoint _PublishEndpoint;
 
-		public AuctionsController(AuctionDataContext context, IMapper mapper)
+		public AuctionsController(AuctionDataContext context, IMapper mapper,IPublishEndpoint publishEndpoint)
 		{
 			_Context = context;
 			_Mapper = mapper;
+			_PublishEndpoint = publishEndpoint;
 		}
 
 		[HttpGet]
@@ -64,11 +68,18 @@ namespace AuctionService.Controllers
 
 			_Context.Auctions.Add(auction);
 
+			var newAuction = _Mapper.Map<AuctionDTO>(auction);
+
+			await _PublishEndpoint.Publish(_Mapper.Map<AuctionCreated>(newAuction));
+
 			var result = await _Context.SaveChangesAsync() > 0;
 
-			if(!result) return BadRequest("Could not save changes to the DB");
+			
 
-			return CreatedAtAction(nameof(GetAuctionById), new {auction.Id},_Mapper.Map<AuctionDTO>(auction));
+
+			if (!result) return BadRequest("Could not save changes to the DB");
+
+			return CreatedAtAction(nameof(GetAuctionById), new {auction.Id},newAuction);
 		}
 
 		[HttpPut("{id}")]
@@ -87,6 +98,8 @@ namespace AuctionService.Controllers
 			auction.Item.Mileage = updateAuctionDTO.Mileage ?? auction.Item.Mileage;
 			auction.Item.Year = updateAuctionDTO.Year ?? auction.Item.Year;
 
+			await _PublishEndpoint.Publish(_Mapper.Map<AuctionUpdated>(auction));
+
 			var result = await _Context.SaveChangesAsync() > 0;
 
 			if (result) return Ok();
@@ -104,6 +117,8 @@ namespace AuctionService.Controllers
 			//TODO: check seller == username
 
 			_Context.Auctions.Remove(auction);
+
+			await _PublishEndpoint.Publish<AuctionDeleted>(new { id = auction.Id.ToString() });
 
 			var result = await _Context.SaveChangesAsync() > 0;
 
